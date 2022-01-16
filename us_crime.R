@@ -57,9 +57,61 @@ validation = nudataset[-validation_index,]
 # Training is the remaining 80% of data for model training and testing.
 training = nudataset[validation_index,]
 
+sapply(training, class)
 
+Summary(training$murders)
+summary(training$murders)
+summary(training$murdPerPop)
+summary(training$rapes)
+summary(training$rapesPerPop)
+summary(training$robberies)
+summary(training$robbbPerPop)
+summary(training$assaults)
+summary(training$assaultPerPop)
+summary(training$burglaries)
+summary(training$burglPerPop)
+summary(training$larcenies)
+summary(training$larcPerPop)
+summary(training$autoTheft)
+summary(training$autoTheftPerPop)
+summary(training$arsons)
+summary(training$arsonsPerPop)
+summary(training$ViolentCrimesPerPop)
+summary(training$nonViolPerPop)
+summary(training$population)
 
+m <- ggplot(training, aes(y=murders)) + geom_boxplot(varwidth=T, fill="plum") +
+  labs(title="Murders",
+       subtitle="",
+       caption="DOJ",
+       x="Murders",
+       y="Count")
 
+mp <- ggplot(training, aes(y=murdPerPop)) + geom_boxplot(varwidth=T, fill="plum") +
+  labs(title="Murders",
+       subtitle="",
+       caption="DOJ",
+       x="Murders",
+       y="Per Resident")
 
+m
+mp
+# Tighter bounds around around murder pers pop.
 
+v <- ggplot(training, aes(y=ViolentCrimesPerPop)) + geom_boxplot(varwidth=T, fill="plum") +
+  labs(title="Violent Crimes",
+       subtitle="",
+       caption="DOJ",
+       x="Violent Crimes",
+       y="Per Resident")
 
+nv <- ggplot(training, aes(y=nonViolPerPop)) + geom_boxplot(varwidth=T, fill="plum") +
+  labs(title="Non-Violent Crimes",
+       subtitle="",
+       caption="DOJ",
+       x="Non-Violent Crimes",
+       y="Per Resident")
+
+crimebifig = ggarrange(v, nv,
+                ncol = 2)
+crimebifig
