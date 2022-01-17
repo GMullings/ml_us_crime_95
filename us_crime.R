@@ -115,3 +115,13 @@ nv <- ggplot(training, aes(y=nonViolPerPop)) + geom_boxplot(varwidth=T, fill="pl
 crimebifig = ggarrange(v, nv,
                 ncol = 2)
 crimebifig
+
+plot(training[,6], training[,146], main="Population x Non-violent Crime Per Person", xlab="Population", ylab="Non-Violent Crime Per Person", pch=20)
+plot(training[,6], training[,145], main="Population x Violent Crime Per Person", xlab="Population", ylab="Violent Crime Per Person", pch=20)
+# Crime Rates seem unrelated to population after per person control.
+plot(training[,8], training[,145], main="County Black % x Violent Crime Per Person", xlab="Population", ylab="% Black", pch=20)
+# Seems like a positive relationship between the proportion of Black residents in the County and crime, but this is likely masking an omitted variable.
+plot(training[,8], training[,34], main="County Black % x % In Poverty", xlab="Population % Black", ylab="Population % In Poverty", pch=20)
+# Poverty and the Black proportion seem correlated, and might explain the relationship between race proportions and crime.
+plot(training[,34], training[,145], main="County % In Poverty x Violent Crime Per Person", xlab="Population % In Poverty", ylab="Violent Crimes Per Person", pch=20)
+# Violent crime and Poverty are positively related.
