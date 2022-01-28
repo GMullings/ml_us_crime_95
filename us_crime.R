@@ -4,8 +4,10 @@ setwd("~/R/mit_ml/us_crime")
 # Ensure you have the latest versions of GGPlot2 and IPred installed, they're common hiccups
 install.packages("caret")
 install.packages("ellipse")
+install.packages("car")
 library(caret)
 library(ellipse)
+library(car)
 
 # Ingestion
 download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/00211/CommViolPredUnnormalizedData.txt","CommViolPredUnnormalizedData.txt")
@@ -51,6 +53,7 @@ x = cbind.data.frame(dataset[ ,1:5],x) # Rebinding demographics to goals, first 
 
 # Creating the training dataset of 80% of the rows in the original dataset.
 nudataset = cbind.data.frame(x,y[6:23])
+nudataset[is.na(nudataset)] = 0
 validation_index <- createDataPartition(nudataset$murders, p=0.80, list=FALSE)
 # Selecting 20% of the data for validation.
 validation = nudataset[-validation_index,]
@@ -125,3 +128,29 @@ plot(training[,8], training[,34], main="County Black % x % In Poverty", xlab="Po
 # Poverty and the Black proportion seem correlated, and might explain the relationship between race proportions and crime.
 plot(training[,34], training[,145], main="County % In Poverty x Violent Crime Per Person", xlab="Population % In Poverty", ylab="Violent Crimes Per Person", pch=20)
 # Violent crime and Poverty are positively related.
+
+# Investigating relationships
+covs = cor(training[,6:128],training[,129:146])
+NonVRegs = as.data.frame(cor(training[,6:128],training[,145]))
+NonVRegsPrime = subset(NonVRegs, V1 > .5) # These variables show the most promise for our "anchor" regressors.
+NonVRegsNeg = subset(NonVRegs, V1 < -.5) # These variables show the most promise for our "anchor" regressors.
+lm_model <- lm(ViolentCrimesPerPop ??? PctKidsBornNeverMar + PctKids2Par + racePctWhite + (PctKidsBornNeverMar*PctKids2Par), data=training) # After including the interaction term KidsBornNeverMar is insignificant.
+lm_model <- lm(ViolentCrimesPerPop ??? PctKids2Par + racePctWhite + FemalePctDiv + (PctKids2Par*FemalePctDiv), data=training) # Model improved by including Female divorce percentage with an interaction term for interactions with Percentage of kids in 2 parent households
+
+# Seeking out omitted variables
+PctKidsOms = as.data.frame(cor(training[,6:128],training[,50]))
+PctKidsOms = rbind.data.frame(subset(PctKidsOms, V1 > .5), subset(PctKidsOms, V1 < -.5))
+cor(training$ViolentCrimesPerPop, training$pctWPubAsst)
+lm_model2 <- lm(ViolentCrimesPerPop ??? PctKids2Par + racePctWhite + FemalePctDiv + pctWPubAsst + (PctKids2Par*FemalePctDiv), data=training)
+
+racePctWhiteOms = as.data.frame(cor(training[,6:128],training[,9]))
+racePctWhiteOms = rbind.data.frame(subset(racePctWhiteOms, V1 > .5), subset(racePctWhiteOms, V1 < -.5))
+cor(training$ViolentCrimesPerPop, training$PctPersDenseHous)
+lm_model2 <- lm(ViolentCrimesPerPop ??? PctKids2Par + racePctWhite + FemalePctDiv + pctWPubAsst + PctPersDenseHous + (PctKids2Par*FemalePctDiv), data=training)
+vif(lm_model) # Housing Density may have been an omitted variable allowing for more interaction between race percentages and public assistance in each county.
+lm_model2 <- lm(ViolentCrimesPerPop ??? racePctWhite + FemalePctDiv + pctWPubAsst + (racePctWhite*pctWPubAsst), data=training)
+
+# Evaluating the better model with Akaike test
+AIC(lm_model)
+AIC(lm_model2)
+# Model one seems to be moderately better.
