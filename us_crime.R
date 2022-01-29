@@ -146,11 +146,27 @@ lm_model2 <- lm(ViolentCrimesPerPop ??? PctKids2Par + racePctWhite + FemalePctDi
 racePctWhiteOms = as.data.frame(cor(training[,6:128],training[,9]))
 racePctWhiteOms = rbind.data.frame(subset(racePctWhiteOms, V1 > .5), subset(racePctWhiteOms, V1 < -.5))
 cor(training$ViolentCrimesPerPop, training$PctPersDenseHous)
+cor(training$racePctWhite, training$PctPopUnderPov)
+cor(training$ViolentCrimesPerPop, training$PctPopUnderPov)
+lm_model1 <- lm(ViolentCrimesPerPop ??? racePctWhite + FemalePctDiv + pctWPubAsst + (racePctWhite*pctWPubAsst) + PctPopUnderPov, data=training)
+vif(lm_model1)
 lm_model2 <- lm(ViolentCrimesPerPop ??? PctKids2Par + racePctWhite + FemalePctDiv + pctWPubAsst + PctPersDenseHous + (PctKids2Par*FemalePctDiv), data=training)
 vif(lm_model) # Housing Density may have been an omitted variable allowing for more interaction between race percentages and public assistance in each county.
 lm_model2 <- lm(ViolentCrimesPerPop ??? racePctWhite + FemalePctDiv + pctWPubAsst + (racePctWhite*pctWPubAsst), data=training)
 
 # Evaluating the better model with Akaike test
 AIC(lm_model)
+AIC(lm_model1)
 AIC(lm_model2)
 # Model one seems to be moderately better.
+
+# Linear Regression Prediction
+predictedlm = as.data.frame(predict(lm_model1, validation))
+residslm = validation$ViolentCrimesPerPop-predictedlm
+ggplot(residslm, aes(y=predict(lm_model1, validation))) + geom_boxplot(varwidth=T, fill="plum") +
+labs(title="Violent Crimes Prediction Resids",
+subtitle="",
+caption="DOJ",
+x="Violent Crimes",
+y="Residual")
+
