@@ -5,9 +5,13 @@ setwd("~/R/mit_ml/us_crime")
 install.packages("caret")
 install.packages("ellipse")
 install.packages("car")
+install.packages("factoextra")
 library(caret)
 library(ellipse)
 library(car)
+library(factoextra)
+library(cluster)
+library(cluster)
 
 # Ingestion
 download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/00211/CommViolPredUnnormalizedData.txt","CommViolPredUnnormalizedData.txt")
@@ -59,6 +63,10 @@ validation_index <- createDataPartition(nudataset$murders, p=0.80, list=FALSE)
 validation = nudataset[-validation_index,]
 # Training is the remaining 80% of data for model training and testing.
 training = nudataset[validation_index,]
+
+# Scaling datasets for K-Clustering
+scaletraining = scale(training[6:146])
+scalevalidation = scale(validation[6:146])
 
 sapply(training, class)
 
@@ -129,7 +137,7 @@ plot(training[,8], training[,34], main="County Black % x % In Poverty", xlab="Po
 plot(training[,34], training[,145], main="County % In Poverty x Violent Crime Per Person", xlab="Population % In Poverty", ylab="Violent Crimes Per Person", pch=20)
 # Violent crime and Poverty are positively related.
 
-# Investigating relationships
+# Linear Regression setup, investigating relationships
 covs = cor(training[,6:128],training[,129:146])
 NonVRegs = as.data.frame(cor(training[,6:128],training[,145]))
 NonVRegsPrime = subset(NonVRegs, V1 > .5) # These variables show the most promise for our "anchor" regressors.
@@ -142,7 +150,7 @@ PctKidsOms = as.data.frame(cor(training[,6:128],training[,50]))
 PctKidsOms = rbind.data.frame(subset(PctKidsOms, V1 > .5), subset(PctKidsOms, V1 < -.5))
 cor(training$ViolentCrimesPerPop, training$pctWPubAsst)
 lm_model2 <- lm(ViolentCrimesPerPop ??? PctKids2Par + racePctWhite + FemalePctDiv + pctWPubAsst + (PctKids2Par*FemalePctDiv), data=training)
-
+fviz_nbclust(df, kmeans, method = "wss")
 racePctWhiteOms = as.data.frame(cor(training[,6:128],training[,9]))
 racePctWhiteOms = rbind.data.frame(subset(racePctWhiteOms, V1 > .5), subset(racePctWhiteOms, V1 < -.5))
 cor(training$ViolentCrimesPerPop, training$PctPersDenseHous)
@@ -169,4 +177,30 @@ subtitle="",
 caption="DOJ",
 x="Violent Crimes",
 y="Residual")
+
+# K Cluster Classification Setup, finding the optimal number of clusters.
+fviz_nbclust(scaletraining, kmeans, method = "wss") # Based on sum of squares 5 seems like the optimal number of clusters.
+gap_stat = clusGap(scaletraining, FUN = kmeans, nstart = 25, K.max = 10, B = 50)
+fviz_gap_stat(gap_stat) # I think the gap stat is underestimating due to tightly packed clusters.
+
+# Predictor-ish function for kmeans
+predict.kmeans <- function(object, newdata){
+centers <- object$centers
+n_centers <- nrow(centers)
+dist_mat <- as.matrix(dist(rbind(centers, newdata)))
+dist_mat <- dist_mat[-seq(n_centers), seq(n_centers)]
+max.col(-dist_mat)
+}
+
+# K Cluster classification
+kmeans_model = kmeans(scaletraining, centers = 5, nstart = 25)
+fviz_cluster(kmeans_model, data = scaletraining) # My suspicions were correct, the clusters are tightly packed with two big outliers.
+aggregate(training, by=list(cluster=kmeans_model$cluster), mean)
+
+predictedkm = as.data.frame(predict(kmeans_model, scalevalidation))
+colnames(predictedkm) = "cluster"
+predictedkm = cbind(predictedkm, validation)
+aggregate(validation, by=list(cluster=predictedkm$cluster), mean)
+aggregate(validation, by=list(cluster=predictedkm$cluster), mean) - aggregate(training, by=list(cluster=kmeans_model$cluster), mean) # The difference in means
+
 
