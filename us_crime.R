@@ -11,7 +11,7 @@ library(ellipse)
 library(car)
 library(factoextra)
 library(cluster)
-library(cluster)
+library(class)
 
 # Ingestion
 download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/00211/CommViolPredUnnormalizedData.txt","CommViolPredUnnormalizedData.txt")
@@ -64,9 +64,13 @@ validation = nudataset[-validation_index,]
 # Training is the remaining 80% of data for model training and testing.
 training = nudataset[validation_index,]
 
-# Scaling datasets for K-Clustering
-scaletraining = scale(training[6:146])
-scalevalidation = scale(validation[6:146])
+# Scaling datasets for K-Clustering and KNN Regression, using the predictive (X) columns to identify clusters with dependent var (Y) means. Validation set's identification and dependent var means will be compared. 
+scaletraining = as.data.frame(scale(training[6:146]))
+scalevalidation = as.data.frame(scale(validation[6:146]))
+scaletrainingx = as.data.frame(scale(training[6:128]))
+scaletrainingy = as.data.frame(scale(training[129:146]))
+scalevalidationx = as.data.frame(scale(validation[6:128]))
+scalevalidationy = as.data.frame(scale(validation[129:146]))
 
 sapply(training, class)
 
@@ -171,16 +175,19 @@ AIC(lm_model2)
 # Linear Regression Prediction
 predictedlm = as.data.frame(predict(lm_model1, validation))
 residslm = validation$ViolentCrimesPerPop-predictedlm
+# Linear Regresion predicted validation set R Squared
+cor(validation$ViolentCrimesPerPop, predictedlm) ^ 2
+
 ggplot(residslm, aes(y=predict(lm_model1, validation))) + geom_boxplot(varwidth=T, fill="plum") +
-labs(title="Violent Crimes Prediction Resids",
+labs(title="Linear Regression Model Violent Crimes Prediction Resids",
 subtitle="",
 caption="DOJ",
 x="Violent Crimes",
 y="Residual")
 
 # K Cluster Classification Setup, finding the optimal number of clusters.
-fviz_nbclust(scaletraining, kmeans, method = "wss") # Based on sum of squares 5 seems like the optimal number of clusters.
-gap_stat = clusGap(scaletraining, FUN = kmeans, nstart = 25, K.max = 10, B = 50)
+fviz_nbclust(scaletrainingx, kmeans, method = "wss") # Based on sum of squares 5 seems like the optimal number of clusters.
+gap_stat = clusGap(scaletrainingx, FUN = kmeans, nstart = 25, K.max = 10, B = 50)
 fviz_gap_stat(gap_stat) # I think the gap stat is underestimating due to tightly packed clusters.
 
 # Predictor-ish function for kmeans
@@ -193,14 +200,46 @@ max.col(-dist_mat)
 }
 
 # K Cluster classification
-kmeans_model = kmeans(scaletraining, centers = 5, nstart = 25)
-fviz_cluster(kmeans_model, data = scaletraining) # My suspicions were correct, the clusters are tightly packed with two big outliers.
+kmeans_model = kmeans(scaletrainingx, centers = 5, nstart = 25)
+fviz_cluster(kmeans_model, data = scaletrainingx) # My suspicions were correct, the clusters are tightly packed with LA and NYC as two big outliers. NYC is its own cluster.
 aggregate(training, by=list(cluster=kmeans_model$cluster), mean)
 
-predictedkm = as.data.frame(predict(kmeans_model, scalevalidation))
+predictedkm = as.data.frame(predict(kmeans_model, scalevalidationx))
 colnames(predictedkm) = "cluster"
 predictedkm = cbind(predictedkm, validation)
-aggregate(validation, by=list(cluster=predictedkm$cluster), mean)
-aggregate(validation, by=list(cluster=predictedkm$cluster), mean) - aggregate(training, by=list(cluster=kmeans_model$cluster), mean) # The difference in means
+aggregate(validation, by=list(cluster=predictedkm$cluster), mean) # NYC is enough of an outlier that no validation data falls into its categorization.
+aggregate(validation, by=list(cluster=predictedkm$cluster), mean) - head(aggregate(training, by=list(cluster=kmeans_model$cluster), mean),-1) # The difference in means, removing the fifth cluster from the validation set because NYC is an outlier and had no comparison.
+# Violent Crimes Per Pop means from the training set clustering were well within one standard deviation of the validation set's associated cluster distribution.
 
+# K-Nearest Neighbor (KNN) Regression setup
+control = trainControl(method="cv", number=10)
+metric = "Rsquared"
 
+# KNN Ridge Regression
+set.seed(7)
+knn_model = train(ViolentCrimesPerPop~., data=scaletraining, method="knn", metric=metric, trControl=control)
+# Basic KNN Regression
+set.seed(7)
+knn_model1 = knnreg(ViolentCrimesPerPop~., data=scaletraining)
+# KNN Regression predictions and evaluation
+predictedknn = as.data.frame(predict(knn_model, scalevalidation))
+predictedknn1 = as.data.frame(predict(knn_model1, scalevalidation))
+# RMSE
+residsknn = as.data.frame(scalevalidation$ViolentCrimesPerPop-predictedknn)
+residsknn1 = scalevalidation$ViolentCrimesPerPop-predictedknn1
+sqrt(mean(residsknn$`scalevalidation$ViolentCrimesPerPop - predictedknn`^2))
+sqrt(mean(residsknn1$`predict(knn_model1, scalevalidation)`^2))
+# R-Squared
+cor(scalevalidationy$ViolentCrimesPerPop, predictedknn) ^ 2
+cor(scalevalidationy$ViolentCrimesPerPop, predictedknn1) ^ 2
+
+# Ridge regression seems to be a better fit.
+
+ggplot(residsknn, aes(y=predict(knn_model, scalevalidation))) + geom_boxplot(varwidth=T, fill="plum") +
+  labs(title="KNN Regression Model Violent Crimes Prediction Resids",
+       subtitle="",
+       caption="DOJ",
+       x="Violent Crimes",
+       y="Residual")
+
+# KNN Model 1 seems to be the best fit.
