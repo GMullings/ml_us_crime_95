@@ -6,12 +6,15 @@ install.packages("caret")
 install.packages("ellipse")
 install.packages("car")
 install.packages("factoextra")
+install.packages("rpart.plot")
 library(caret)
 library(ellipse)
 library(car)
 library(factoextra)
 library(cluster)
 library(class)
+library(rpart)
+library(rpart.plot)
 
 # Ingestion
 download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/00211/CommViolPredUnnormalizedData.txt","CommViolPredUnnormalizedData.txt")
@@ -74,7 +77,6 @@ scalevalidationy = as.data.frame(scale(validation[129:146]))
 
 sapply(training, class)
 
-Summary(training$murders)
 summary(training$murders)
 summary(training$murdPerPop)
 summary(training$rapes)
@@ -146,35 +148,37 @@ covs = cor(training[,6:128],training[,129:146])
 NonVRegs = as.data.frame(cor(training[,6:128],training[,145]))
 NonVRegsPrime = subset(NonVRegs, V1 > .5) # These variables show the most promise for our "anchor" regressors.
 NonVRegsNeg = subset(NonVRegs, V1 < -.5) # These variables show the most promise for our "anchor" regressors.
-lm_model <- lm(ViolentCrimesPerPop ??? PctKidsBornNeverMar + PctKids2Par + racePctWhite + (PctKidsBornNeverMar*PctKids2Par), data=training) # After including the interaction term KidsBornNeverMar is insignificant.
-lm_model <- lm(ViolentCrimesPerPop ??? PctKids2Par + racePctWhite + FemalePctDiv + (PctKids2Par*FemalePctDiv), data=training) # Model improved by including Female divorce percentage with an interaction term for interactions with Percentage of kids in 2 parent households
+lm_model <- lm(ViolentCrimesPerPop ~ PctKidsBornNeverMar + PctKids2Par + racePctWhite + (PctKidsBornNeverMar*PctKids2Par), data=training) # After including the interaction term KidsBornNeverMar is insignificant.
+lm_model <- lm(ViolentCrimesPerPop ~ PctKids2Par + racePctWhite + FemalePctDiv + (PctKids2Par*FemalePctDiv), data=training) # Model improved by including Female divorce percentage with an interaction term for interactions with Percentage of kids in 2 parent households
 
 # Seeking out omitted variables
 PctKidsOms = as.data.frame(cor(training[,6:128],training[,50]))
 PctKidsOms = rbind.data.frame(subset(PctKidsOms, V1 > .5), subset(PctKidsOms, V1 < -.5))
 cor(training$ViolentCrimesPerPop, training$pctWPubAsst)
-lm_model2 <- lm(ViolentCrimesPerPop ??? PctKids2Par + racePctWhite + FemalePctDiv + pctWPubAsst + (PctKids2Par*FemalePctDiv), data=training)
+lm_model2 <- lm(ViolentCrimesPerPop ~ PctKids2Par + racePctWhite + FemalePctDiv + pctWPubAsst + (PctKids2Par*FemalePctDiv), data=training)
 fviz_nbclust(df, kmeans, method = "wss")
 racePctWhiteOms = as.data.frame(cor(training[,6:128],training[,9]))
 racePctWhiteOms = rbind.data.frame(subset(racePctWhiteOms, V1 > .5), subset(racePctWhiteOms, V1 < -.5))
 cor(training$ViolentCrimesPerPop, training$PctPersDenseHous)
 cor(training$racePctWhite, training$PctPopUnderPov)
 cor(training$ViolentCrimesPerPop, training$PctPopUnderPov)
-lm_model1 <- lm(ViolentCrimesPerPop ??? racePctWhite + FemalePctDiv + pctWPubAsst + (racePctWhite*pctWPubAsst) + PctPopUnderPov, data=training)
+lm_model1 <- lm(ViolentCrimesPerPop ~ racePctWhite + FemalePctDiv + pctWPubAsst + (racePctWhite*pctWPubAsst) + PctPopUnderPov, data=training)
 vif(lm_model1)
-lm_model2 <- lm(ViolentCrimesPerPop ??? PctKids2Par + racePctWhite + FemalePctDiv + pctWPubAsst + PctPersDenseHous + (PctKids2Par*FemalePctDiv), data=training)
+lm_model2 <- lm(ViolentCrimesPerPop ~ PctKids2Par + racePctWhite + FemalePctDiv + pctWPubAsst + PctPersDenseHous + (PctKids2Par*FemalePctDiv), data=training)
 vif(lm_model) # Housing Density may have been an omitted variable allowing for more interaction between race percentages and public assistance in each county.
-lm_model2 <- lm(ViolentCrimesPerPop ??? racePctWhite + FemalePctDiv + pctWPubAsst + (racePctWhite*pctWPubAsst), data=training)
+lm_model2 <- lm(ViolentCrimesPerPop ~ racePctWhite + FemalePctDiv + pctWPubAsst + (racePctWhite*pctWPubAsst), data=training)
 
 # Evaluating the better model with Akaike test
 AIC(lm_model)
 AIC(lm_model1)
 AIC(lm_model2)
-# Model one seems to be moderately better.
+# Lm_model1 seems to be moderately better.
 
 # Linear Regression Prediction
 predictedlm = as.data.frame(predict(lm_model1, validation))
 residslm = validation$ViolentCrimesPerPop-predictedlm
+# RMSE
+sqrt(mean(residslm$`predict(lm_model1, validation)`^2))
 # Linear Regresion predicted validation set R Squared
 cor(validation$ViolentCrimesPerPop, predictedlm) ^ 2
 
@@ -227,7 +231,7 @@ predictedknn1 = as.data.frame(predict(knn_model1, scalevalidation))
 # RMSE
 residsknn = as.data.frame(scalevalidation$ViolentCrimesPerPop-predictedknn)
 residsknn1 = scalevalidation$ViolentCrimesPerPop-predictedknn1
-sqrt(mean(residsknn$`scalevalidation$ViolentCrimesPerPop - predictedknn`^2))
+sqrt(mean(residsknn$`predict(knn_model, scalevalidation)`^2))
 sqrt(mean(residsknn1$`predict(knn_model1, scalevalidation)`^2))
 # R-Squared
 cor(scalevalidationy$ViolentCrimesPerPop, predictedknn) ^ 2
@@ -242,4 +246,18 @@ ggplot(residsknn, aes(y=predict(knn_model, scalevalidation))) + geom_boxplot(var
        x="Violent Crimes",
        y="Residual")
 
-# KNN Model 1 seems to be the best fit.
+# CART Regression
+cart_model = rpart(ViolentCrimesPerPop ~ racePctWhite + FemalePctDiv + pctWPubAsst + PctPopUnderPov, data = training, control=rpart.control(cp=0.0001))
+bestcart <- cart_model$cptable[which.min(cart_model$cptable[,"xerror"]),"CP"]
+pruned_cart_model <- prune(cart_model, cp=bestcart)
+prp(pruned_cart_model,
+    faclen=0, #use full names for factor labels
+    extra=1, #display number of obs. for each terminal node
+    roundint=F, #don't round to integers in output
+    digits=5) #display 5 decimal places in output
+predictedcart = as.data.frame(predict(pruned_cart_model, validation))
+residscart = validation$ViolentCrimesPerPop-predictedcart
+# RMSE
+sqrt(mean(residscart$`predict(pruned_cart_model, validation)`^2)) # Slightly better than linear regression
+# R Squared
+cor(validation$ViolentCrimesPerPop, predictedcart) ^ 2
