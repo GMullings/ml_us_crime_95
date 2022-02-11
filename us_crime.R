@@ -7,6 +7,12 @@ install.packages("ellipse")
 install.packages("car")
 install.packages("factoextra")
 install.packages("rpart.plot")
+install.packages("ggplot2")
+install.packages("ggpubr")
+install.packages("adabag")
+library(adabag)
+library(ggplot2)
+library(ggpubr)
 library(caret)
 library(ellipse)
 library(car)
@@ -66,6 +72,10 @@ validation_index <- createDataPartition(nudataset$murders, p=0.80, list=FALSE)
 validation = nudataset[-validation_index,]
 # Training is the remaining 80% of data for model training and testing.
 training = nudataset[validation_index,]
+trainingx = training[6:128]
+validationx = validation[6:128]
+trainingy = training[129:146]
+boosttraining = cbind.data.frame(trainingx, trainingy)
 
 # Scaling datasets for K-Clustering and KNN Regression, using the predictive (X) columns to identify clusters with dependent var (Y) means. Validation set's identification and dependent var means will be compared. 
 scaletraining = as.data.frame(scale(training[6:146]))
@@ -156,7 +166,6 @@ PctKidsOms = as.data.frame(cor(training[,6:128],training[,50]))
 PctKidsOms = rbind.data.frame(subset(PctKidsOms, V1 > .5), subset(PctKidsOms, V1 < -.5))
 cor(training$ViolentCrimesPerPop, training$pctWPubAsst)
 lm_model2 <- lm(ViolentCrimesPerPop ~ PctKids2Par + racePctWhite + FemalePctDiv + pctWPubAsst + (PctKids2Par*FemalePctDiv), data=training)
-fviz_nbclust(df, kmeans, method = "wss")
 racePctWhiteOms = as.data.frame(cor(training[,6:128],training[,9]))
 racePctWhiteOms = rbind.data.frame(subset(racePctWhiteOms, V1 > .5), subset(racePctWhiteOms, V1 < -.5))
 cor(training$ViolentCrimesPerPop, training$PctPersDenseHous)
@@ -247,6 +256,7 @@ ggplot(residsknn, aes(y=predict(knn_model, scalevalidation))) + geom_boxplot(var
        y="Residual")
 
 # CART Regression
+set.seed(7)
 cart_model = rpart(ViolentCrimesPerPop ~ racePctWhite + FemalePctDiv + pctWPubAsst + PctPopUnderPov, data = training, control=rpart.control(cp=0.0001))
 bestcart <- cart_model$cptable[which.min(cart_model$cptable[,"xerror"]),"CP"]
 pruned_cart_model <- prune(cart_model, cp=bestcart)
