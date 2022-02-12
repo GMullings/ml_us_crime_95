@@ -9,8 +9,7 @@ install.packages("factoextra")
 install.packages("rpart.plot")
 install.packages("ggplot2")
 install.packages("ggpubr")
-install.packages("adabag")
-library(adabag)
+install.packages("mboost")
 library(ggplot2)
 library(ggpubr)
 library(caret)
@@ -21,6 +20,7 @@ library(cluster)
 library(class)
 library(rpart)
 library(rpart.plot)
+library(mboost)
 
 # Ingestion
 download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/00211/CommViolPredUnnormalizedData.txt","CommViolPredUnnormalizedData.txt")
@@ -198,6 +198,8 @@ caption="DOJ",
 x="Violent Crimes",
 y="Residual")
 
+### K Cluster area, results from here will vary since this is executed partly with Monte Carlo
+
 # K Cluster Classification Setup, finding the optimal number of clusters.
 fviz_nbclust(scaletrainingx, kmeans, method = "wss") # Based on sum of squares 5 seems like the optimal number of clusters.
 gap_stat = clusGap(scaletrainingx, FUN = kmeans, nstart = 25, K.max = 10, B = 50)
@@ -271,3 +273,23 @@ residscart = validation$ViolentCrimesPerPop-predictedcart
 sqrt(mean(residscart$`predict(pruned_cart_model, validation)`^2)) # Slightly better than linear regression
 # R Squared
 cor(validation$ViolentCrimesPerPop, predictedcart) ^ 2
+
+#GLM Boost
+glm_model <- glmboost(ViolentCrimesPerPop ~ racePctWhite + FemalePctDiv + pctWPubAsst + (racePctWhite*pctWPubAsst) + PctPopUnderPov, data=training)
+glm_model1 <- glmboost(training$ViolentCrimesPerPop~., data=trainingx)
+
+# GLM Prediction
+predictedglm = as.data.frame(predict(glm_model, validation))
+predictedglm1 = as.data.frame(predict(glm_model1, validation))
+residsglm = validation$ViolentCrimesPerPop-predictedglm
+residsglm1 = validation$ViolentCrimesPerPop-predictedglm1
+
+# RMSE
+sqrt(mean(residsglm$V1^2))
+sqrt(mean(residsglm1$V1^2))
+
+# R Squared
+cor(validation$ViolentCrimesPerPop, predictedglm) ^ 2
+cor(validation$ViolentCrimesPerPop, predictedglm1) ^ 2
+
+
