@@ -1,0 +1,274 @@
+---
+title: "Comparing Machine Learning and Linear Regression Approaches To Predicting Violent Crime Rates"
+author: "Geoff Mullings"
+date: "2/17/2022"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) # Turns off warning messages
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+library(ggplot2)
+library(ggpubr)
+library(caret)
+library(ellipse)
+library(car)
+library(factoextra)
+library(cluster)
+library(class)
+library(rpart)
+library(rpart.plot)
+library(mboost)
+library(randomForest)
+library(knitr)
+
+# Ingestion
+download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/00211/CommViolPredUnnormalizedData.txt","CommViolPredUnnormalizedData.txt")
+dataset <- read.delim("CommViolPredUnnormalizedData.txt", sep = ",", header=FALSE)
+filename <- "headers.csv" # Headers had to be created in Excel from attribute information in README
+headers <- read.csv(filename)
+colnames(dataset) = colnames(headers)
+
+x = dataset[,6:129] # Potential predictors
+y = dataset[130:147] # Potential goals
+
+f = sapply(y,is.factor)
+y[ , f] = as.data.frame(apply(y[ , f], 2, as.numeric))
+y = cbind.data.frame(dataset[ ,1:5],y)
+
+f = sapply(x,is.factor)
+x[ , f] = as.data.frame(apply(x[ , f], 2, as.numeric))
+NominalX = dataset$LemasGangUnitDeploy
+x = x[ ,-122] # Removing LemasGangUnitDeploy from numeric predictor set.
+x = cbind.data.frame(dataset[ ,1:5],x) # Rebinding demographics to goals, first five columns
+
+# Creating the training dataset of 80% of the rows in the original dataset.
+nudataset = cbind.data.frame(x,y[6:23])
+nudataset[is.na(nudataset)] = 0
+set.seed(100)
+validation_index <- createDataPartition(nudataset$murders, p=0.80, list=FALSE)
+# Selecting 20% of the data for validation.
+validation = nudataset[-validation_index,]
+# Training is the remaining 80% of data for model training and testing.
+training = nudataset[validation_index,]
+trainingx = training[6:128]
+validationx = validation[6:128]
+trainingy = training[129:146]
+carttraining = cbind.data.frame(trainingx, trainingy[17])
+carttraining = carttraining[,colSums(is.na(carttraining))<1]
+
+# Scaling datasets for KNN Regression, using the predictive (X) columns to identify clusters with dependent var (Y) means. Validation set's identification and dependent var means will be compared. 
+scaletraining = as.data.frame(scale(training[6:146]))
+scaletraining[is.na(scaletraining)] = 0
+scalevalidation = as.data.frame(scale(validation[6:146]))
+scalevalidation[is.na(scalevalidation)] = 0
+scaletrainingx = as.data.frame(scale(training[6:128]))
+scaletrainingy = as.data.frame(scale(training[129:146]))
+scalevalidationx = as.data.frame(scale(validation[6:128]))
+scalevalidationy = as.data.frame(scale(validation[129:146]))
+knntraining = cbind.data.frame(scaletrainingx, scaletrainingy[17])
+knntraining = knntraining[,colSums(is.na(knntraining))<1]
+
+control = trainControl(method="cv", number=10)
+metric = "Rsquared"
+
+```
+
+<h2>Executive Summary:</h2>
+
+Predicting crime, and in particular violent crime, has a long history in the literature of many social sciences. And for good reason, as crime rates have been of practical interest to the American public since at least 1870. Typically linear regression models would be estimated to predict a continous numerical variable like crime rates. More recently though computer algorithims, especially machine learning models, have been researched as a way to predict crime in the US. This analysis compares an ordinary least squares estimated linear regression model to five machine learning models on their ability to predict violent crime rates in the US using variables from the US Census. The linear regression model was competitive with the non-ensemble method machine learning models, but surpassed by the GLM Boosting and Random Forest models. This suggests that the high variability in the dataset, likely due to correlations between racial concentration, family structure, and violent crime is best handled by ensemble models that improve upon weak base learner models.
+
+<h2>Introduction:</h2>
+
+Predicting crime rates is probably a hope as old as measuring crime. According to a [1977 pubication](https://www.academia.edu/1106101/Crime_Statistics_A_Historical_Perspective) by Michael Maltz, an Associate Professor at the University of Illinois at Chicago Circle, Congress brought Federal attention to crime reporting in June of 1870 when they passed PL 41-97. The law established the Department of Justice and an obligation for the US Attorney General to report national crime statistics to Congress. The law was mostly ignored until sentiments that crime was rising in the 1920s and 30s led Congress in June of 1930 to task the Federal Bureau of Investigation (FBI) with collecting and disseminating crime statistics. Earlier that year the International Association of Cheifs of Police alongside the Social Science Research Council had published the first version of what we know today as the FBI's Uniform Crime Report.
+
+There is a rich history of crime prediction approaches in the literature. More [recently researchers have advocated the benefits of applying machine learning models](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8081790/) to predicting crime rates.
+
+This analysis relies heavily on the 1995 US FBI Uniform Crime Report, as well as the 1990 US Census and the 1990 US Law Enforcement Management and Administrative Statistics Survey. This same dataset was used by [Redmond and Highley in 2010](https://link.springer.com/chapter/10.1007/978-90-481-9112-3_14) to apply Case-Editing approaches to predicting violent crime rates. Violent Crime Per Person is predicted for 443 jurisdictions using six models, including ordinary least squares linear regression and machine learning algorithims. The models are evaluated based on the R-squared and Root Mean Squared Errors of their predictions.
+
+<h2>Data Materials</h2>
+
+The analyzed dataset was donated by Michael Redmond of LaSalle University and can be downloaded [here](https://archive.ics.uci.edu/ml/machine-learning-databases/00211/CommViolPredUnnormalizedData.txt). Within are 123 potential predictor variables obtained from the 1990 US Census and the 1990 US Law Enforcement Management and Administrative Statistics Survey. There are 17 additional dependent variables, including values for violent crime per person in most of the 2215 jurisdictions aggregated.
+
+Six models were trained against 1597 (80% of the dataset) randomly selected jurisdictions with recorded violent crime rates and used to predict Violent Crime per person in the remaining 442 jurisdictions.
+
+Violent crime rates are not normally distributed based on the Shapiro-Wilk normality test. Rates average about 589 per person with a standard deviation of 614 per person and a midpoint value of about 374 per person.
+
+```{r Violent Crime Boxp, echo=FALSE, warnings=FALSE}
+v <- ggplot(nudataset, aes(y=ViolentCrimesPerPop)) + geom_boxplot(varwidth=T, fill="plum") +
+  labs(title="Violent Crime Rates",
+       subtitle="For 1,994 jurisdictions with availiable data",
+       caption="Source: 1995 US FBI Uniform Crime Report",
+       x="Violent Crimes",
+       y="Per Resident")
+v
+```
+
+In pre-processing, indpendent variables with missing observations were dropped. Afterward 101 indpendent variables were left for the analysis. For all the regression models, the dataset was shuffled and split into two sets: training set and validation set. 20% of the data were held for validation, and 80% of the data were used for training. Tenfold cross-validation was applied to the training set for the K-Nearest Neighbor and Support Vector Machines models.
+
+For the KNN models the independent variable values were scaled to a mean of 0 and a standard deviation of 1.
+
+<h3>Ordinary Least Squares Linear Regression</h3>
+
+A linear regression model was specified, iteratively built with predictor covariances as a starting point for selecting independent variables. Variables correlated with dependent variable were evaluated for their statistical significance and then tested together for multicolliniarity. Omitted variables were then sought out and included if appropriate. 
+
+Three linear regression models were compared, some shared independent variables and included interactive terms. Notably the interaction of the female divorce rate and the percentage of children in two parent households isn't statistically significant in Model 1 but is in Model 3, which includes variables for public assistance uptake rates and housing density in addition to the variables in Model 1.
+
+```{r lmmodels, echo=FALSE, warnings=FALSE}
+lm_model <- lm(ViolentCrimesPerPop ~ PctKids2Par + racePctWhite + FemalePctDiv + (PctKids2Par*FemalePctDiv), data=training)
+lm_model1 <- lm(ViolentCrimesPerPop ~ racePctWhite + FemalePctDiv + pctWPubAsst + (racePctWhite*pctWPubAsst) + PctPopUnderPov, data=training)
+lm_model2 <- lm(ViolentCrimesPerPop ~ PctKids2Par + racePctWhite + FemalePctDiv + pctWPubAsst + PctPersDenseHous + (PctKids2Par*FemalePctDiv), data=training)
+
+tab_model(lm_model, lm_model1, lm_model2, dv.labels = c("Model 1", "Model 2", "Model 3"))
+```
+
+Model 3 was selected based on Akaike Information Criterion values as well as R-squared values.
+
+<h3>GLM Boost Regression</h3>
+
+A Generalized Linear Model was fitted using a boosting algorithim based on univariate models. Boosting algorithims learn sequentially, with each misclassified datapoint reweighted in the next iteration. A GLM boosted model was trained on the entire predictor training dataset.
+
+```{r GLM, echo=FALSE, warnings=FALSE}
+glm_model <- glmboost(ViolentCrimesPerPop~., data=carttraining)
+```
+
+<h3>K-Nearest Neighbor (KNN) Regressions</h3>
+
+Covariance analysis reveals that many of the 123 potential independent predictors are correlated to each other. For example, a jurisdiction's African American population percentage is correlated with its violent crime rate, as is the county's poverty rate. Both predictors are also correlated with each other, presenting a multicolliniarity challenge in a typical linear regression.
+
+A ridge regression is well suited to address this challenge with doezens of potential independent variables. A ridge regression was specified using the KNN classification algorithim, in addition to a basic KNN classification regression. Both were trained on normalized independent and dependent variables using a 10 fold cross-validation approach. The optimal ridge regression was determined based on R-squared performance.
+
+```{r knn, echo=FALSE, warnings=FALSE}
+# KNN Ridge Regression
+set.seed(7)
+knn_model = train(ViolentCrimesPerPop~., data=knntraining, method="knn", metric=metric, trControl=control)
+# Basic KNN Regression
+set.seed(7)
+knn_model1 = knnreg(ViolentCrimesPerPop~., data=knntraining)
+
+```
+
+<h3>CART Regression</h3>
+
+Classification and Regression Trees (CART) models also address multicolliniarity through a decision tree approach, and is well suited for specifying significant independent variables from many options. Multiple CART models were specified and the model with the lowest cross-validation errors was chosen for pruning. The below decison tree shows the most important independent variable states from top to bottom, with terminal nodes that indicate average Violent Crime rates and the number of observations fitting within that node of the tree (n = #).
+
+```{r CART, echo=FALSE, warnings=FALSE}
+set.seed(7)
+cart_model = rpart(ViolentCrimesPerPop~., data = carttraining, control=rpart.control(cp=0.0001))
+bestcart <- cart_model$cptable[which.min(cart_model$cptable[,"xerror"]),"CP"]
+pruned_cart_model <- prune(cart_model, cp=bestcart)
+prp(pruned_cart_model,
+    faclen=0, #use full names for factor labels
+    extra=1, #display number of obs. for each terminal node
+    roundint=F, #don't round to integers in output
+    digits=5) #display 5 decimal places in output
+
+```
+
+<h3>SVM Regression</h3>
+
+Support Vectors Machines separates data points using hyperplanes to maximize the distance between clusters of observations. A SVM model was specified with a radial kernel, trained with a 10 fold cross-validation approach, and optimized based on R-squared performance.
+
+```{r SVM, echo=FALSE, warnings=FALSE}
+set.seed(7)
+svm_model <- train(ViolentCrimesPerPop~., data=carttraining, method="svmRadial", metric=metric, trControl=control)
+
+```
+
+<h3>Random Forest Regression</h3>
+
+Random Forest is a decision tree model relying on both the bagging method of parallel training and feature selection randomness to generate multiple weak "tree" base learner models that are then aggregated into a "forest" model. The approach is considered "blackbox" in how challenging it is to externalize any interpretations, but the model can yield fantastic predictions when faced with many potential independent variables and highy variable data. A random forest model was trained on the entire predictor training dataset.
+
+```{r RF, echo=FALSE, warnings=FALSE}
+rf_model = randomForest(ViolentCrimesPerPop~., data=carttraining)
+
+```
+
+<h2>Predictions</h2>
+
+To evaluate the performance of regression models root mean squared error (RMSE) and R-Squared were used. A model with a low RMSE and high R-Squared is desired. RMSE indicates the spread of the forecast errors. A model with high prediction volatility will have a higher RMSE value. R-Squared measures the correlation between the predicted values and the actuals in the validation set. The results for both for all six models are given in table 1 below.
+
+The Random Forest model had the lowest RMSE and highest R-Squared values against the validation data. The CART model had the highest RMSE and lowest R-Squared value.
+
+```{r pred table, echo=FALSE, warnings=FALSE, results = 'asis'}
+validsd = sd(validation$ViolentCrimesPerPop)
+
+# Linear Regression Prediction - Model 3 based on AIC
+predictedlm = as.data.frame(predict(lm_model2, validation))
+residslm = validation$ViolentCrimesPerPop-predictedlm
+# RMSE
+lmrmse = sqrt(mean(residslm$`predict(lm_model2, validation)`^2))
+# R Squared
+lmrsq = cor(validation$ViolentCrimesPerPop, predictedlm) ^ 2
+
+# GLM Prediction
+predictedglm = as.data.frame(predict(glm_model, validation))
+residsglm = validation$ViolentCrimesPerPop-predictedglm
+# RMSE
+glmrmse = sqrt(mean(residsglm$V1^2))
+# R Squared
+glmrsq = cor(validation$ViolentCrimesPerPop, predictedglm) ^ 2
+
+# KNN Regression
+predictedknn = as.data.frame(predict(knn_model, scalevalidation)) # Ridge
+predictedknn1 = as.data.frame(predict(knn_model1, scalevalidation))
+# RMSE
+residsknn = as.data.frame(scalevalidation$ViolentCrimesPerPop-predictedknn)
+residsknn1 = scalevalidation$ViolentCrimesPerPop-predictedknn1
+knnrmse = sqrt(mean(residsknn$`predict(knn_model, scalevalidation)`^2))*validsd
+knnrmse1 = sqrt(mean(residsknn1$`predict(knn_model1, scalevalidation)`^2))*validsd
+# R-Squared
+knnrsq = cor(scalevalidationy$ViolentCrimesPerPop, predictedknn) ^ 2
+knnrsq1 = cor(scalevalidationy$ViolentCrimesPerPop, predictedknn1) ^ 2
+
+# CART Prediction
+predictedcart = as.data.frame(predict(pruned_cart_model, validation))
+residscart = validation$ViolentCrimesPerPop-predictedcart
+# RMSE
+cartrmse = sqrt(mean(residscart$`predict(pruned_cart_model, validation)`^2)) # Slightly better than linear regression
+# R Squared
+cartrsq = cor(validation$ViolentCrimesPerPop, predictedcart) ^ 2
+
+# SVM Predictions
+predictedsvm = as.data.frame(predict(svm_model, validation))
+residssvm = validation$ViolentCrimesPerPop-predictedsvm
+# RMSE
+svmrmse = sqrt(mean(residssvm$'predict(svm_model, validation)'^2))
+# R Squared
+svmrsq = cor(validation$ViolentCrimesPerPop, predictedsvm) ^ 2
+
+# Random Forest
+predictedrf = as.data.frame(predict(rf_model, validation))
+residsrf = validation$ViolentCrimesPerPop-predictedrf
+# RMSE
+rfrmse = sqrt(mean(residsrf$'predict(rf_model, validation)'^2))
+# R Squared
+rfrsq = cor(validation$ViolentCrimesPerPop, predictedrf) ^ 2
+
+firstcolumn = c("RMSE", "R-Squared")
+linearreg = round(c(lmrmse, lmrsq),3)
+glmreg = round(c(glmrmse, glmrsq),3)
+knnregg = round(c(knnrmse, knnrsq),3)
+knnreg1 = round(c(knnrmse1, knnrsq1),3)
+cartreg = round(c(cartrmse, cartrsq),3)
+svmreg = round(c(svmrmse, svmrsq),3)
+rfreg = round(c(rfrmse, rfrsq),3)
+predtable = data.frame(firstcolumn, linearreg, glmreg, knnregg, knnreg1, cartreg, svmreg, rfreg)
+colnames(predtable) = c("Prediction Evaluators", "Linear", "GLM", "KNN Ridge", "KNN", "CART", "SVM", "Random Forest")
+
+kable(predtable, caption="Table 1")
+```
+
+
+<h2>Discussion and Further Analysis</h2>
+
+This analysis compares a linear regression model to machine learning models for predicting violent crime rates. Although the best performing model was the Random Forest model, the best linear regression model had a higher R-Squared value and lower RMSE than the worst three machine learning models: CART and both versions of the KNN algorithim. Interpretability and non-linear robustness is part of CART's strong suits, but both it and KNN models are very susceptible to predictive variance depending on the makeup of the training dataset. Thirty-nine percent of the training observations ended up in one CART node, indicative of class imbalance that likely contributed to all three model's shortcomings in prediction. 
+
+The underfitted CART node was on a branch for racially concentrated white, two parent household jurisdictions. Future analysis should consider if subsetting data for modeling in consideration of the effects of US segregation would improve CART's predictive power.
+
+To some extent an advantage of the linear regression model was its ability to control for some of the effects of racial concentration, likely through the inclusion of housing density. Model 3 has a more precise estimate of the white population percentage coefficient after estimating the independent relationship between housing density and violent crime rates.
+
+GLM Boost and Random Forest regressions were the best performing models and both ensemble machine learning methods. Random Forest is different in its use of the bagging method which may have been well suited for a highly variant dataset with large outliers. Even GLM's boosting clearly addressed some of the variation challenges posed by racially concentrated, household resourced jurisdictions.
+
+This analysis was conducted in R. You can find the backup code and full variable list [here, on my GitHub](https://github.com/GMullings/ml_us_crime_95).

@@ -10,6 +10,8 @@ install.packages("rpart.plot")
 install.packages("ggplot2")
 install.packages("ggpubr")
 install.packages("mboost")
+install.packages("tidyverse")
+library(tidyverse)
 library(ggplot2)
 library(ggpubr)
 library(caret)
@@ -21,6 +23,7 @@ library(class)
 library(rpart)
 library(rpart.plot)
 library(mboost)
+library(randomForest)
 
 # Ingestion
 download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/00211/CommViolPredUnnormalizedData.txt","CommViolPredUnnormalizedData.txt")
@@ -66,7 +69,10 @@ x = cbind.data.frame(dataset[ ,1:5],x) # Rebinding demographics to goals, first 
 
 # Creating the training dataset of 80% of the rows in the original dataset.
 nudataset = cbind.data.frame(x,y[6:23])
-nudataset[is.na(nudataset)] = 0
+nudataset = nudataset %>% drop_na(ViolentCrimesPerPop)
+# Forces the NAs to 0s instead
+#nudataset[is.na(nudataset)] = 0
+set.seed(100)
 validation_index <- createDataPartition(nudataset$murders, p=0.80, list=FALSE)
 # Selecting 20% of the data for validation.
 validation = nudataset[-validation_index,]
@@ -75,15 +81,20 @@ training = nudataset[validation_index,]
 trainingx = training[6:128]
 validationx = validation[6:128]
 trainingy = training[129:146]
-boosttraining = cbind.data.frame(trainingx, trainingy)
+carttraining = cbind.data.frame(trainingx, trainingy[17])
+carttraining = carttraining[,colSums(is.na(carttraining))<1]
 
 # Scaling datasets for K-Clustering and KNN Regression, using the predictive (X) columns to identify clusters with dependent var (Y) means. Validation set's identification and dependent var means will be compared. 
 scaletraining = as.data.frame(scale(training[6:146]))
+scaletraining[is.na(scaletraining)] = 0
 scalevalidation = as.data.frame(scale(validation[6:146]))
+scalevalidation[is.na(scalevalidation)] = 0
 scaletrainingx = as.data.frame(scale(training[6:128]))
 scaletrainingy = as.data.frame(scale(training[129:146]))
 scalevalidationx = as.data.frame(scale(validation[6:128]))
 scalevalidationy = as.data.frame(scale(validation[129:146]))
+knntraining = cbind.data.frame(scaletrainingx, scaletrainingy[17])
+knntraining = knntraining[,colSums(is.na(knntraining))<1]
 
 sapply(training, class)
 
@@ -232,10 +243,10 @@ metric = "Rsquared"
 
 # KNN Ridge Regression
 set.seed(7)
-knn_model = train(ViolentCrimesPerPop~., data=scaletraining, method="knn", metric=metric, trControl=control)
+knn_model = train(ViolentCrimesPerPop~., data=knntraining, method="knn", metric=metric, trControl=control)
 # Basic KNN Regression
 set.seed(7)
-knn_model1 = knnreg(ViolentCrimesPerPop~., data=scaletraining)
+knn_model1 = knnreg(ViolentCrimesPerPop~., data=knntraining)
 # KNN Regression predictions and evaluation
 predictedknn = as.data.frame(predict(knn_model, scalevalidation))
 predictedknn1 = as.data.frame(predict(knn_model1, scalevalidation))
@@ -259,14 +270,20 @@ ggplot(residsknn, aes(y=predict(knn_model, scalevalidation))) + geom_boxplot(var
 
 # CART Regression
 set.seed(7)
-cart_model = rpart(ViolentCrimesPerPop ~ racePctWhite + FemalePctDiv + pctWPubAsst + PctPopUnderPov, data = training, control=rpart.control(cp=0.0001))
-bestcart <- cart_model$cptable[which.min(cart_model$cptable[,"xerror"]),"CP"]
+cart_model = rpart(ViolentCrimesPerPop~., data = carttraining, control=rpart.control(cp=0.0001))
+bestcart <- cart_model$cptable[which.min(cart_model$cptable[,"xerror"]),"CP"] # Best CP specification chosen based on the lowest cross validation error.
 pruned_cart_model <- prune(cart_model, cp=bestcart)
 prp(pruned_cart_model,
     faclen=0, #use full names for factor labels
     extra=1, #display number of obs. for each terminal node
     roundint=F, #don't round to integers in output
     digits=5) #display 5 decimal places in output
+# Training RMSE & R Squared
+trainingcart = as.data.frame(predict(pruned_cart_model, training))
+residstraincart = training$ViolentCrimesPerPop-trainingcart
+sqrt(mean(residstraincart$`predict(pruned_cart_model, training)`^2))
+cor(training$ViolentCrimesPerPop, trainingcart) ^ 2
+# CART Prediction
 predictedcart = as.data.frame(predict(pruned_cart_model, validation))
 residscart = validation$ViolentCrimesPerPop-predictedcart
 # RMSE
@@ -275,21 +292,48 @@ sqrt(mean(residscart$`predict(pruned_cart_model, validation)`^2)) # Slightly bet
 cor(validation$ViolentCrimesPerPop, predictedcart) ^ 2
 
 #GLM Boost
-glm_model <- glmboost(ViolentCrimesPerPop ~ racePctWhite + FemalePctDiv + pctWPubAsst + (racePctWhite*pctWPubAsst) + PctPopUnderPov, data=training)
-glm_model1 <- glmboost(training$ViolentCrimesPerPop~., data=trainingx)
+glm_model <- glmboost(ViolentCrimesPerPop~., data=carttraining)
+coef(glm_model, off2int = TRUE)
+trainingglm = as.data.frame(predict(glm_model, carttraining))
+residstrainglm = training$ViolentCrimesPerPop-trainingglm
+sqrt(mean(residstrainglm$V1^2))
+cor(training$ViolentCrimesPerPop, trainingglm) ^ 2
 
 # GLM Prediction
 predictedglm = as.data.frame(predict(glm_model, validation))
-predictedglm1 = as.data.frame(predict(glm_model1, validation))
 residsglm = validation$ViolentCrimesPerPop-predictedglm
-residsglm1 = validation$ViolentCrimesPerPop-predictedglm1
 
 # RMSE
 sqrt(mean(residsglm$V1^2))
-sqrt(mean(residsglm1$V1^2))
-
 # R Squared
 cor(validation$ViolentCrimesPerPop, predictedglm) ^ 2
-cor(validation$ViolentCrimesPerPop, predictedglm1) ^ 2
 
+# Support Vector Machines (SVM)
+set.seed(7)
+svm_model <- train(ViolentCrimesPerPop~., data=carttraining, method="svmRadial", metric=metric, trControl=control)
+print(svm_model)
 
+# SVM Predictions
+predictedsvm = as.data.frame(predict(svm_model, validation))
+residssvm = validation$ViolentCrimesPerPop-predictedsvm
+
+# RMSE
+sqrt(mean(residssvm$'predict(svm_model, validation)'^2))
+# R Squared
+cor(validation$ViolentCrimesPerPop, predictedsvm) ^ 2
+
+# Random Forest Regressions
+rf_model = randomForest(ViolentCrimesPerPop~., data=carttraining)
+varImp(rf_model)
+trainingrf = as.data.frame(predict(rf_model, carttraining))
+residstrainrf = training$ViolentCrimesPerPop-trainingrf
+sqrt(mean(residstrainrf$'predict(rf_model, carttraining)'^2))
+cor(training$ViolentCrimesPerPop, trainingrf) ^ 2
+
+predictedrf = as.data.frame(predict(rf_model, validation))
+residsrf = validation$ViolentCrimesPerPop-predictedrf
+
+# RMSE
+sqrt(mean(residsrf$'predict(rf_model, validation)'^2))
+# R Squared
+cor(validation$ViolentCrimesPerPop, predictedrf) ^ 2
